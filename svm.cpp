@@ -1765,38 +1765,6 @@ static void svm_binary_svc_probability(
 	free(perm);
 }
 
-// Return parameter of a Laplace distribution
-static double svm_svr_probability(
-                                  const svm_problem *prob, const svm_parameter *param)
-{
-	int i;
-	int nr_fold = 5;
-	double *ymv = Malloc(double,prob->l);
-	double mae = 0;
-    
-	svm_parameter newparam = *param;
-	newparam.probability = 0;
-	svm_cross_validation(prob,&newparam,nr_fold,ymv);
-	for(i=0;i<prob->l;i++)
-	{
-		ymv[i]=prob->y[i]-ymv[i];
-		mae += fabs(ymv[i]);
-	}
-	mae /= prob->l;
-	double std=sqrt(2*mae*mae);
-	int count=0;
-	mae=0;
-	for(i=0;i<prob->l;i++)
-		if (fabs(ymv[i]) > 5*std)
-			count=count+1;
-		else
-			mae+=fabs(ymv[i]);
-	mae /= (prob->l-count);
-	info("Prob. model for test data: target value = predicted value + z,\nz: Laplace distribution e^(-|z|/sigma)/(2sigma),sigma= %g\n",mae);
-	free(ymv);
-	return mae;
-}
-
 
 // label: label name, start: begin of each class, count: #data of classes, perm: indices to the original data
 // perm, length l, must be allocated before calling this subroutine
@@ -1884,50 +1852,6 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 	model->param = *param;
 	model->free_sv = 0;	// XXX
     
-	if(param->svm_type == ONE_CLASS ||
-	   param->svm_type == EPSILON_SVR ||
-	   param->svm_type == NU_SVR)
-	{
-		// regression or one-class-svm
-		model->nr_class = 2;
-		model->label = NULL;
-		model->nSV = NULL;
-		model->probA = NULL; model->probB = NULL;
-		model->sv_coef = Malloc(double *,1);
-        
-		if(param->probability &&
-		   (param->svm_type == EPSILON_SVR ||
-		    param->svm_type == NU_SVR))
-		{
-			model->probA = Malloc(double,1);
-			model->probA[0] = svm_svr_probability(prob,param);
-		}
-        
-		decision_function f = svm_train_one(prob,param,0,0);
-		model->rho = Malloc(double,1);
-		model->rho[0] = f.rho;
-        
-		int nSV = 0;
-		int i;
-		for(i=0;i<prob->l;i++)
-			if(fabs(f.alpha[i]) > 0) ++nSV;
-		model->l = nSV;
-		model->SV = Malloc(svm_node *,nSV);
-		model->sv_coef[0] = Malloc(double,nSV);
-		model->sv_indices = Malloc(int,nSV);
-		int j = 0;
-		for(i=0;i<prob->l;i++)
-			if(fabs(f.alpha[i]) > 0)
-			{
-				model->SV[j] = prob->x[i];
-				model->sv_coef[0][j] = f.alpha[i];
-				model->sv_indices[j] = i+1;
-				++j;
-			}
-        
-		free(f.alpha);
-	}
-	else
 	{
 		// classification
 		int l = prob->l;
@@ -2125,125 +2049,6 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 }
 
 // Stratified cross validation
-void svm_cross_validation(const svm_problem *prob, const svm_parameter *param, int nr_fold, double *target)
-{
-	int i;
-	int *fold_start;
-	int l = prob->l;
-	int *perm = Malloc(int,l);
-	int nr_class;
-	if (nr_fold > l)
-	{
-		nr_fold = l;
-		fprintf(stderr,"WARNING: # folds > # data. Will use # folds = # data instead (i.e., leave-one-out cross validation)\n");
-	}
-	fold_start = Malloc(int,nr_fold+1);
-	// stratified cv may not give leave-one-out rate
-	// Each class to l folds -> some folds may have zero elements
-	if((param->svm_type == C_SVC ||
-	    param->svm_type == NU_SVC) && nr_fold < l)
-	{
-		int *start = NULL;
-		int *label = NULL;
-		int *count = NULL;
-		svm_group_classes(prob,&nr_class,&label,&start,&count,perm);
-        
-		// random shuffle and then data grouped by fold using the array perm
-		int *fold_count = Malloc(int,nr_fold);
-		int c;
-		int *index = Malloc(int,l);
-		for(i=0;i<l;i++)
-			index[i]=perm[i];
-		for (c=0; c<nr_class; c++)
-			for(i=0;i<count[c];i++)
-			{
-				int j = i+rand()%(count[c]-i);
-				swap(index[start[c]+j],index[start[c]+i]);
-			}
-		for(i=0;i<nr_fold;i++)
-		{
-			fold_count[i] = 0;
-			for (c=0; c<nr_class;c++)
-				fold_count[i]+=(i+1)*count[c]/nr_fold-i*count[c]/nr_fold;
-		}
-		fold_start[0]=0;
-		for (i=1;i<=nr_fold;i++)
-			fold_start[i] = fold_start[i-1]+fold_count[i-1];
-		for (c=0; c<nr_class;c++)
-			for(i=0;i<nr_fold;i++)
-			{
-				int begin = start[c]+i*count[c]/nr_fold;
-				int end = start[c]+(i+1)*count[c]/nr_fold;
-				for(int j=begin;j<end;j++)
-				{
-					perm[fold_start[i]] = index[j];
-					fold_start[i]++;
-				}
-			}
-		fold_start[0]=0;
-		for (i=1;i<=nr_fold;i++)
-			fold_start[i] = fold_start[i-1]+fold_count[i-1];
-		free(start);
-		free(label);
-		free(count);
-		free(index);
-		free(fold_count);
-	}
-	else
-	{
-		for(i=0;i<l;i++) perm[i]=i;
-		for(i=0;i<l;i++)
-		{
-			int j = i+rand()%(l-i);
-			swap(perm[i],perm[j]);
-		}
-		for(i=0;i<=nr_fold;i++)
-			fold_start[i]=i*l/nr_fold;
-	}
-    
-	for(i=0;i<nr_fold;i++)
-	{
-		int begin = fold_start[i];
-		int end = fold_start[i+1];
-		int j,k;
-		struct svm_problem subprob;
-        
-		subprob.l = l-(end-begin);
-		subprob.x = Malloc(struct svm_node*,subprob.l);
-		subprob.y = Malloc(double,subprob.l);
-        
-		k=0;
-		for(j=0;j<begin;j++)
-		{
-			subprob.x[k] = prob->x[perm[j]];
-			subprob.y[k] = prob->y[perm[j]];
-			++k;
-		}
-		for(j=end;j<l;j++)
-		{
-			subprob.x[k] = prob->x[perm[j]];
-			subprob.y[k] = prob->y[perm[j]];
-			++k;
-		}
-		struct svm_model *submodel = svm_train(&subprob,param);
-		if(param->probability &&
-		   (param->svm_type == C_SVC || param->svm_type == NU_SVC))
-		{
-			double *prob_estimates=Malloc(double,svm_get_nr_class(submodel));
-			for(j=begin;j<end;j++)
-				target[perm[j]] = svm_predict_probability(submodel,prob->x[perm[j]],prob_estimates);
-			free(prob_estimates);
-		}
-		else
-			for(j=begin;j<end;j++)
-				target[perm[j]] = svm_predict(submodel,prob->x[perm[j]]);
-		svm_free_and_destroy_model(&submodel);
-		free(subprob.x);
-		free(subprob.y);
-	}
-	free(fold_start);
-	free(perm);
-}
 
 
 int svm_get_svm_type(const svm_model *model)
@@ -2290,23 +2095,7 @@ double svm_get_svr_probability(const svm_model *model)
 double svm_predict_values(const svm_model *model, const svm_node *x, double* dec_values)
 {
 	int i;
-	if(model->param.svm_type == ONE_CLASS ||
-	   model->param.svm_type == EPSILON_SVR ||
-	   model->param.svm_type == NU_SVR)
-	{
-		double *sv_coef = model->sv_coef[0];
-		double sum = 0;
-		for(i=0;i<model->l;i++)
-			sum += sv_coef[i] * Kernel::k_function(x,model->SV[i],model->param);
-		sum -= model->rho[0];
-		*dec_values = sum;
-        
-		if(model->param.svm_type == ONE_CLASS)
-			return (sum>0)?1:-1;
-		else
-			return sum;
-	}
-	else
+
 	{
 		int nr_class = model->nr_class;
 		int l = model->l;
@@ -2367,12 +2156,8 @@ double svm_predict(const svm_model *model, const svm_node *x)
 {
 	int nr_class = model->nr_class;
 	double *dec_values;
-	if(model->param.svm_type == ONE_CLASS ||
-	   model->param.svm_type == EPSILON_SVR ||
-	   model->param.svm_type == NU_SVR)
-		dec_values = Malloc(double, 1);
-	else
-		dec_values = Malloc(double, nr_class*(nr_class-1)/2);
+
+    dec_values = Malloc(double, nr_class*(nr_class-1)/2);
 	double pred_result = svm_predict_values(model, x, dec_values);
 	free(dec_values);
 	return pred_result;
@@ -2588,11 +2373,7 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 	// svm_type
     
 	int svm_type = param->svm_type;
-	if(svm_type != C_SVC &&
-	   svm_type != NU_SVC &&
-	   svm_type != ONE_CLASS &&
-	   svm_type != EPSILON_SVR &&
-	   svm_type != NU_SVR)
+	if(svm_type != C_SVC)
 		return "unknown svm type";
 	
 	// kernel_type, degree
@@ -2619,22 +2400,11 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 	if(param->eps <= 0)
 		return "eps <= 0";
     
-	if(svm_type == C_SVC ||
-	   svm_type == EPSILON_SVR ||
-	   svm_type == NU_SVR)
+	if(svm_type == C_SVC)
 		if(param->C <= 0)
 			return "C <= 0";
     
-	if(svm_type == NU_SVC ||
-	   svm_type == ONE_CLASS ||
-	   svm_type == NU_SVR)
-		if(param->nu <= 0 || param->nu > 1)
-			return "nu <= 0 or nu > 1";
-    
-	if(svm_type == EPSILON_SVR)
-		if(param->p < 0)
-			return "p < 0";
-    
+	   
 	if(param->shrinking != 0 &&
 	   param->shrinking != 1)
 		return "shrinking != 0 and shrinking != 1";
@@ -2646,60 +2416,6 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 	if(param->probability == 1 &&
 	   svm_type == ONE_CLASS)
 		return "one-class SVM probability output not supported yet";
-    
-    
-	// check whether nu-svc is feasible
-	
-	if(svm_type == NU_SVC)
-	{
-		int l = prob->l;
-		int max_nr_class = 16;
-		int nr_class = 0;
-		int *label = Malloc(int,max_nr_class);
-		int *count = Malloc(int,max_nr_class);
-        
-		int i;
-		for(i=0;i<l;i++)
-		{
-			int this_label = (int)prob->y[i];
-			int j;
-			for(j=0;j<nr_class;j++)
-				if(this_label == label[j])
-				{
-					++count[j];
-					break;
-				}
-			if(j == nr_class)
-			{
-				if(nr_class == max_nr_class)
-				{
-					max_nr_class *= 2;
-					label = (int *)realloc(label,max_nr_class*sizeof(int));
-					count = (int *)realloc(count,max_nr_class*sizeof(int));
-				}
-				label[nr_class] = this_label;
-				count[nr_class] = 1;
-				++nr_class;
-			}
-		}
-        
-		for(i=0;i<nr_class;i++)
-		{
-			int n1 = count[i];
-			for(int j=i+1;j<nr_class;j++)
-			{
-				int n2 = count[j];
-				if(param->nu*(n1+n2)/2 > min(n1,n2))
-				{
-					free(label);
-					free(count);
-					return "specified nu is infeasible";
-				}
-			}
-		}
-		free(label);
-		free(count);
-	}
     
 	return NULL;
 }
