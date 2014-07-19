@@ -8,22 +8,18 @@ extern "C" {
 #endif
 
 extern int libsvm_version;
-//node type
-typedef int n_index;
-typedef double n_value;
-//struct svm_node
-//{
-//	int index;
-//	double value;
-//};
-static int mt_max_index;
+
+struct svm_node
+{
+	int index;
+	double value;
+};
+
 struct svm_problem
 {
 	int l;
 	double *y;
-	n_index **x_index;
-    n_value **x_value;
-    int max_index;
+	struct svm_node **x;
 };
 
 enum { C_SVC, NU_SVC, ONE_CLASS, EPSILON_SVR, NU_SVR };	/* svm_type */
@@ -58,8 +54,7 @@ struct svm_model
 	struct svm_parameter param;	/* parameter */
 	int nr_class;		/* number of classes, = 2 in regression/one class svm */
 	int l;			/* total #SV */
-	n_index **SV_index;
-    n_value **SV_value;		/* SVs (SV[l]) */
+	struct svm_node **SV;		/* SVs (SV[l]) */
 	double **sv_coef;	/* coefficients for SVs in decision functions (sv_coef[k-1][l]) */
 	double *rho;		/* constants in decision functions (rho[k*(k-1)/2]) */
 	double *probA;		/* pariwise probability information */
@@ -89,9 +84,9 @@ void svm_get_sv_indices(const struct svm_model *model, int *sv_indices);
 int svm_get_nr_sv(const struct svm_model *model);
 double svm_get_svr_probability(const struct svm_model *model);
 
-double svm_predict_values(const struct svm_model *model, const n_index *x_index, const n_value *x_value, double* dec_values);
-double svm_predict(const struct svm_model *model, const n_index *x_index, const n_value *x_value);
-double svm_predict_probability(const struct svm_model *model, const n_index *x_index, const n_value *x_value, double* prob_estimates);
+double svm_predict_values(const struct svm_model *model, const struct svm_node *x, double* dec_values);
+double svm_predict(const struct svm_model *model, const struct svm_node *x);
+double svm_predict_probability(const struct svm_model *model, const struct svm_node *x, double* prob_estimates);
 
 void svm_free_model_content(struct svm_model *model_ptr);
 void svm_free_and_destroy_model(struct svm_model **model_ptr_ptr);
