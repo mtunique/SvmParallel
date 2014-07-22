@@ -55,7 +55,8 @@ void read_problem(const char *filename);
 struct svm_parameter param;		// set by parse_command_line
 struct svm_problem prob;		// set by read_problem
 struct svm_model *model;
-struct svm_node *x_space;
+n_index *x_space_index;  n_value *x_space_value;
+
 int cross_validation;
 int nr_fold;
 
@@ -108,8 +109,10 @@ int main(int argc, char **argv)
 	}
 	svm_destroy_param(&param);
 	free(prob.y);
-	free(prob.x);
-	free(x_space);
+	free(prob.x_index);
+    free(prob.x_value);
+	free(x_space_index);
+    free(x_space_value);
 	free(line);
     
 	return 0;
@@ -269,8 +272,10 @@ void read_problem(const char *filename)
 	rewind(fp);
     
 	prob.y = Malloc(double,prob.l);
-	prob.x = Malloc(struct svm_node *,prob.l);
-	x_space = Malloc(struct svm_node,elements);
+	prob.x_index = Malloc(n_index *,prob.l);
+    prob.x_value = Malloc(n_value *,prob.l);
+	x_space_index = Malloc(n_index,elements);
+    x_space_value = Malloc(n_value,elements);
     
 	max_index = 0;
 	j=0;
@@ -278,7 +283,8 @@ void read_problem(const char *filename)
 	{
 		inst_max_index = -1; // strtol gives 0 if wrong format, and precomputed kernel has <index> start from 0
 		readline(fp);
-		prob.x[i] = &x_space[j];
+		prob.x_index[i] = &x_space_index[j];
+        prob.x_value[i] = &x_space_value[j];
 		label = strtok(line," \t\n");
 		if(label == NULL) // empty line
 			exit_input_error(i+1);
@@ -296,14 +302,14 @@ void read_problem(const char *filename)
 				break;
             
 			errno = 0;
-			x_space[j].index = (int) strtol(idx,&endptr,10);
-			if(endptr == idx || errno != 0 || *endptr != '\0' || x_space[j].index <= inst_max_index)
+			x_space_index[j] = (int) strtol(idx,&endptr,10);
+			if(endptr == idx || errno != 0 || *endptr != '\0' || x_space_index[j] <= inst_max_index)
 				exit_input_error(i+1);
 			else
-				inst_max_index = x_space[j].index;
+				inst_max_index = x_space_index[j];
             
 			errno = 0;
-			x_space[j].value = strtod(val,&endptr);
+			x_space_value[j] = strtod(val,&endptr);
 			if(endptr == val || errno != 0 || (*endptr != '\0' && !isspace(*endptr)))
 				exit_input_error(i+1);
             
@@ -312,7 +318,7 @@ void read_problem(const char *filename)
         
 		if(inst_max_index > max_index)
 			max_index = inst_max_index;
-		x_space[j++].index = -1;
+		x_space_index[j++] = -1;
 	}
     
 	if(param.gamma == 0 && max_index > 0)

@@ -205,16 +205,17 @@ public:
 
 class Kernel: public QMatrix {
 public:
-	Kernel(int l, svm_node * const * x, const svm_parameter& param);
+	Kernel(int l, n_index * const * x_index, n_value * const * x_value, const svm_parameter& param);
 	virtual ~Kernel();
 
-	static double k_function(const svm_node *x, const svm_node *y,
+	static double k_function(const n_index *x_index, const n_value *x_value, const n_index *y_index,const n_value *y_value,
 				 const svm_parameter& param);
 	virtual Qfloat *get_Q(int column, int len) const = 0;
 	virtual double *get_QD() const = 0;
 	virtual void swap_index(int i, int j) const	// no so const...
 	{
-		swap(x[i],x[j]);
+		swap(x_index[i],x_index[j]);
+        swap(x_value[i],x_value[j]);
 		if(x_square) swap(x_square[i],x_square[j]);
 	}
 protected:
@@ -222,7 +223,8 @@ protected:
 	double (Kernel::*kernel_function)(int i, int j) const;
 
 private:
-	const svm_node **x;
+	const n_index **x_index;
+    const n_value **x_value;
 	double *x_square;
 
 	// svm_parameter
@@ -231,30 +233,30 @@ private:
 	const double gamma;
 	const double coef0;
 
-	static double dot(const svm_node *px, const svm_node *py);
+	static double dot(const n_index *px_index, const n_value *px_value, const n_index *py_index, const n_value *py_value);
 	double kernel_linear(int i, int j) const
 	{
-		return dot(x[i],x[j]);
+		return dot(x_index[i], x_value[i], x_index[j], x_value[j]);
 	}
 	double kernel_poly(int i, int j) const
 	{
-		return powi(gamma*dot(x[i],x[j])+coef0,degree);
+		return powi(gamma*dot(x_index[i], x_value[i], x_index[j], x_value[j])+coef0,degree);
 	}
 	double kernel_rbf(int i, int j) const
 	{
-		return exp(-gamma*(x_square[i]+x_square[j]-2*dot(x[i],x[j])));
+		return exp(-gamma*(x_square[i]+x_square[j]-2*dot(x_index[i], x_value[i], x_index[j], x_value[j])));
 	}
 	double kernel_sigmoid(int i, int j) const
 	{
-		return tanh(gamma*dot(x[i],x[j])+coef0);
+		return tanh(gamma*dot(x_index[i], x_value[i], x_index[j], x_value[j])+coef0);
 	}
 	double kernel_precomputed(int i, int j) const
 	{
-		return x[i][(int)(x[j][0].value)].value;
+		return x_value[i][(int)(x_value[j][0])];
 	}
 };
 
-Kernel::Kernel(int l, svm_node * const * x_, const svm_parameter& param)
+Kernel::Kernel(int l, n_index * const * x__index, n_value * const * x__value, const svm_parameter& param)
 :kernel_type(param.kernel_type), degree(param.degree),
  gamma(param.gamma), coef0(param.coef0)
 {
@@ -277,13 +279,14 @@ Kernel::Kernel(int l, svm_node * const * x_, const svm_parameter& param)
 			break;
 	}
 
-	clone(x,x_,l);
+	clone(x_index,x__index,l);
+    clone(x_value,x__value,l);
 
 	if(kernel_type == RBF)
 	{
 		x_square = new double[l];
 		for(int i=0;i<l;i++)
-			x_square[i] = dot(x[i],x[i]);
+			x_square[i] = dot(x_index[i], x_value[i], x_index[i], x_value[i]);
 	}
 	else
 		x_square = 0;
@@ -291,86 +294,87 @@ Kernel::Kernel(int l, svm_node * const * x_, const svm_parameter& param)
 
 Kernel::~Kernel()
 {
-	delete[] x;
+	delete[] x_index;
+    delete[] x_value;
 	delete[] x_square;
 }
 
-double Kernel::dot(const svm_node *px, const svm_node *py)
+double Kernel::dot(const n_index *px_index, const n_value *px_value, const n_index *py_index, const n_value *py_value)
 {
 	double sum = 0;
-	while(px->index != -1 && py->index != -1)
-	{
-		if(px->index == py->index)
-		{
-			sum += px->value * py->value;
-			++px;
-			++py;
-		}
-		else
-		{
-			if(px->index > py->index)
-				++py;
-			else
-				++px;
-		}			
-	}
+//	while(px->index != -1 && py->index != -1)
+//	{
+//		if(px->index == py->index)
+//		{
+//			sum += px->value * py->value;
+//			++px;
+//			++py;
+//		}
+//		else
+//		{
+//			if(px->index > py->index)
+//				++py;
+//			else
+//				++px;
+//		}			
+//	}
 	return sum;
 }
 
-double Kernel::k_function(const svm_node *x, const svm_node *y,
+double Kernel::k_function(const n_index *x_index, const n_value *x_value, const n_index *y_index, const n_value *y_value,
 			  const svm_parameter& param)
 {
 	switch(param.kernel_type)
 	{
 		case LINEAR:
-			return dot(x,y);
+			return dot(x_index, x_value, y_index, y_value);
 		case POLY:
-			return powi(param.gamma*dot(x,y)+param.coef0,param.degree);
+			return powi(param.gamma*dot(x_index, x_value, y_index, y_value)+param.coef0,param.degree);
 		case RBF:
 		{
 			double sum = 0;
-			while(x->index != -1 && y->index !=-1)
-			{
-				if(x->index == y->index)
-				{
-					double d = x->value - y->value;
-					sum += d*d;
-					++x;
-					++y;
-				}
-				else
-				{
-					if(x->index > y->index)
-					{	
-						sum += y->value * y->value;
-						++y;
-					}
-					else
-					{
-						sum += x->value * x->value;
-						++x;
-					}
-				}
-			}
+//			while(x->index != -1 && y->index !=-1)
+//			{
+//				if(x->index == y->index)
+//				{
+//					double d = x->value - y->value;
+//					sum += d*d;
+//					++x;
+//					++y;
+//				}
+//				else
+//				{
+//					if(x->index > y->index)
+//					{	
+//						sum += y->value * y->value;
+//						++y;
+//					}
+//					else
+//					{
+//						sum += x->value * x->value;
+//						++x;
+//					}
+//				}
+//			}
 
-			while(x->index != -1)
-			{
-				sum += x->value * x->value;
-				++x;
-			}
-
-			while(y->index != -1)
-			{
-				sum += y->value * y->value;
-				++y;
-			}
+//			while(x->index != -1)
+//			{
+//				sum += x->value * x->value;
+//				++x;
+//			}
+//
+//			while(y->index != -1)
+//			{
+//				sum += y->value * y->value;
+//				++y;
+//			}
 			
 			return exp(-param.gamma*sum);
 		}
 		case SIGMOID:
-			return tanh(param.gamma*dot(x,y)+param.coef0);
+			return tanh(param.gamma*dot(x_index, x_value, y_index, y_value)+param.coef0);
 		case PRECOMPUTED:  //x: test (validation), y: SV
-			return x[(int)(y->value)].value;
+			return x_value[(int)(*y_value)];
 		default:
 			return 0;  // Unreachable 
 	}
@@ -1012,7 +1016,7 @@ class SVC_Q: public Kernel
 { 
 public:
 	SVC_Q(const svm_problem& prob, const svm_parameter& param, const schar *y_)
-	:Kernel(prob.l, prob.x, param)
+	:Kernel(prob.l, prob.x_index, prob.x_value, param)
 	{
 		clone(y,y_,prob.l);
 		cache = new Cache(prob.l,(long int)(param.cache_size*(1<<20)));
@@ -1064,7 +1068,7 @@ class SVR_Q: public Kernel
 { 
 public:
 	SVR_Q(const svm_problem& prob, const svm_parameter& param)
-	:Kernel(prob.l, prob.x, param)
+	:Kernel(prob.l, prob.x_index, prob.x_value, param)
 	{
 		l = prob.l;
 		cache = new Cache(l,(long int)(param.cache_size*(1<<20)));
@@ -1366,19 +1370,22 @@ static void svm_binary_svc_probability(
 		struct svm_problem subprob;
 
 		subprob.l = prob->l-(end-begin);
-		subprob.x = Malloc(struct svm_node*,subprob.l);
+		subprob.x_index = Malloc(n_index*,subprob.l);
+        subprob.x_value = Malloc(n_value*,subprob.l);
 		subprob.y = Malloc(double,subprob.l);
 			
 		k=0;
 		for(j=0;j<begin;j++)
 		{
-			subprob.x[k] = prob->x[perm[j]];
+			subprob.x_index[k] = prob->x_index[perm[j]];
+            subprob.x_value[k] = prob->x_value[perm[j]];
 			subprob.y[k] = prob->y[perm[j]];
 			++k;
 		}
 		for(j=end;j<prob->l;j++)
 		{
-			subprob.x[k] = prob->x[perm[j]];
+			subprob.x_index[k] = prob->x_index[perm[j]];
+            subprob.x_value[k] = prob->x_value[perm[j]];
 			subprob.y[k] = prob->y[perm[j]];
 			++k;
 		}
@@ -1413,14 +1420,15 @@ static void svm_binary_svc_probability(
 			struct svm_model *submodel = svm_train(&subprob,&subparam);
 			for(j=begin;j<end;j++)
 			{
-				svm_predict_values(submodel,prob->x[perm[j]],&(dec_values[perm[j]]));
+				svm_predict_values(submodel,prob->x_index[perm[j]], prob->x_value[perm[j]],&(dec_values[perm[j]]));
 				// ensure +1 -1 order; reason not using CV subroutine
 				dec_values[perm[j]] *= submodel->label[0];
 			}		
 			svm_free_and_destroy_model(&submodel);
 			svm_destroy_param(&subparam);
 		}
-		free(subprob.x);
+		free(subprob.x_index);
+        free(subprob.x_value);
 		free(subprob.y);
 	}		
 	sigmoid_train(prob->l,dec_values,prob->y,probA,probB);
@@ -1531,10 +1539,14 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		if(nr_class == 1) 
 			info("WARNING: training data in only one class. See README for details.\n");
 		
-		svm_node **x = Malloc(svm_node *,l);
+		n_index **x_index = Malloc(n_index *,l);
+        n_value **x_value = Malloc(n_value *,l);
 		int i;
 		for(i=0;i<l;i++)
-			x[i] = prob->x[perm[i]];
+        {
+			x_index[i] = prob->x_index[perm[i]];
+            x_value[i] = prob->x_value[perm[i]];
+        }
 
 		// calculate weighted C
 
@@ -1575,17 +1587,21 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 				int si = start[i], sj = start[j];
 				int ci = count[i], cj = count[j];
 				sub_prob.l = ci+cj;
-				sub_prob.x = Malloc(svm_node *,sub_prob.l);
+                sub_prob.x_index = Malloc(n_index*,sub_prob.l);
+                sub_prob.x_value = Malloc(n_value*,sub_prob.l);
+
 				sub_prob.y = Malloc(double,sub_prob.l);
 				int k;
 				for(k=0;k<ci;k++)
 				{
-					sub_prob.x[k] = x[si+k];
+					sub_prob.x_index[k] = x_index[si+k];
+                    sub_prob.x_value[k] = x_value[si+k];
 					sub_prob.y[k] = +1;
 				}
 				for(k=0;k<cj;k++)
 				{
-					sub_prob.x[ci+k] = x[sj+k];
+					sub_prob.x_index[ci+k] = x_index[sj+k];
+                    sub_prob.x_value[ci+k] = x_value[sj+k];
 					sub_prob.y[ci+k] = -1;
 				}
 
@@ -1599,7 +1615,8 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 				for(k=0;k<cj;k++)
 					if(!nonzero[sj+k] && fabs(f[p].alpha[ci+k]) > 0)
 						nonzero[sj+k] = true;
-				free(sub_prob.x);
+				free(sub_prob.x_index);
+                free(sub_prob.x_value);
 				free(sub_prob.y);
 				++p;
 			}
@@ -1651,13 +1668,15 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		info("Total nSV = %d\n",total_sv);
 
 		model->l = total_sv;
-		model->SV = Malloc(svm_node *,total_sv);
+		model->SV_index = Malloc(n_index *,total_sv);
+        model->SV_value = Malloc(n_value *,total_sv);
 		model->sv_indices = Malloc(int,total_sv);
 		p = 0;
 		for(i=0;i<l;i++)
 			if(nonzero[i])
 			{
-				model->SV[p] = x[i];
+				model->SV_index[p] = x_index[i];
+                model->SV_value[p] = x_value[i];
 				model->sv_indices[p++] = perm[i] + 1;
 			}
 
@@ -1701,7 +1720,8 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		free(count);
 		free(perm);
 		free(start);
-		free(x);
+		free(x_index);
+        free(x_value);
 		free(weighted_C);
 		free(nonzero);
 		for(i=0;i<nr_class*(nr_class-1)/2;i++)
@@ -1718,7 +1738,7 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 
 
 
-double svm_predict_values(const svm_model *model, const svm_node *x, double* dec_values)
+double svm_predict_values(const svm_model *model, const n_index *x_index, const n_value *x_value, double* dec_values)
 {
 	int i;
 	if(model->param.svm_type == ONE_CLASS ||
@@ -1728,7 +1748,7 @@ double svm_predict_values(const svm_model *model, const svm_node *x, double* dec
 		double *sv_coef = model->sv_coef[0];
 		double sum = 0;
 		for(i=0;i<model->l;i++)
-			sum += sv_coef[i] * Kernel::k_function(x,model->SV[i],model->param);
+			sum += sv_coef[i] * Kernel::k_function(x_index, x_value, model->SV_index[i], model->SV_value[i], model->param);
 		sum -= model->rho[0];
 		*dec_values = sum;
 
@@ -1744,7 +1764,7 @@ double svm_predict_values(const svm_model *model, const svm_node *x, double* dec
 		
 		double *kvalue = Malloc(double,l);
 		for(i=0;i<l;i++)
-			kvalue[i] = Kernel::k_function(x,model->SV[i],model->param);
+			kvalue[i] = Kernel::k_function(x_index, x_value,model->SV_index[i],model->SV_value[i],model->param);
 
 		int *start = Malloc(int,nr_class);
 		start[0] = 0;
@@ -1874,22 +1894,26 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 
 	fprintf(fp, "SV\n");
 	const double * const *sv_coef = model->sv_coef;
-	const svm_node * const *SV = model->SV;
+	const n_index * const *SV_index = model->SV_index;
+    const n_value * const *SV_value = model->SV_value;
+
 
 	for(int i=0;i<l;i++)
 	{
 		for(int j=0;j<nr_class-1;j++)
 			fprintf(fp, "%.16g ",sv_coef[j][i]);
 
-		const svm_node *p = SV[i];
+		const n_index *p_index = SV_index[i];
+        const n_value *p_value = SV_value[i];
 
 		if(param.kernel_type == PRECOMPUTED)
-			fprintf(fp,"0:%d ",(int)(p->value));
+			fprintf(fp,"0:%d ",(int)(*p_value));
 		else
-			while(p->index != -1)
+			while(*p_index != -1)
 			{
-				fprintf(fp,"%d:%.8g ",p->index,p->value);
-				p++;
+				fprintf(fp,"%d:%.8g ",*p_index,*p_value);
+				p_index++;
+                p_value++;
 			}
 		fprintf(fp, "\n");
 	}
@@ -1912,16 +1936,21 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 
 void svm_free_model_content(svm_model* model_ptr)
 {
-	if(model_ptr->free_sv && model_ptr->l > 0 && model_ptr->SV != NULL)
-		free((void *)(model_ptr->SV[0]));
+	if(model_ptr->free_sv && model_ptr->l > 0 && model_ptr->SV_index != NULL)
+    {
+		free((void *)(model_ptr->SV_index[0]));
+        free((void *)(model_ptr->SV_value[0]));
+    }
 	if(model_ptr->sv_coef)
 	{
 		for(int i=0;i<model_ptr->nr_class-1;i++)
 			free(model_ptr->sv_coef[i]);
 	}
 
-	free(model_ptr->SV);
-	model_ptr->SV = NULL;
+	free(model_ptr->SV_index);
+    free(model_ptr->SV_value);
+	model_ptr->SV_index = NULL;
+    model_ptr->SV_value = NULL;
 
 	free(model_ptr->sv_coef);
 	model_ptr->sv_coef = NULL;
