@@ -9,6 +9,8 @@
 #include <locale.h>
 #include "svm.h"
 int libsvm_version = LIBSVM_VERSION;
+
+
 typedef float Qfloat;
 typedef signed char schar;
 #ifndef min
@@ -302,22 +304,8 @@ Kernel::~Kernel()
 double Kernel::dot(const n_index *px_index, const n_value *px_value, const n_index *py_index, const n_value *py_value)
 {
 	double sum = 0;
-//	while(px->index != -1 && py->index != -1)
-//	{
-//		if(px->index == py->index)
-//		{
-//			sum += px->value * py->value;
-//			++px;
-//			++py;
-//		}
-//		else
-//		{
-//			if(px->index > py->index)
-//				++py;
-//			else
-//				++px;
-//		}			
-//	}
+    for (int i = 0; i< mt_max_index; ++i)
+        sum = *(px_value+i) * (*(py_value+i));
 	return sum;
 }
 
@@ -333,42 +321,12 @@ double Kernel::k_function(const n_index *x_index, const n_value *x_value, const 
 		case RBF:
 		{
 			double sum = 0;
-//			while(x->index != -1 && y->index !=-1)
-//			{
-//				if(x->index == y->index)
-//				{
-//					double d = x->value - y->value;
-//					sum += d*d;
-//					++x;
-//					++y;
-//				}
-//				else
-//				{
-//					if(x->index > y->index)
-//					{	
-//						sum += y->value * y->value;
-//						++y;
-//					}
-//					else
-//					{
-//						sum += x->value * x->value;
-//						++x;
-//					}
-//				}
-//			}
+            for (int i = 0; i< mt_max_index; ++i)
+            {
+                double d = *(x_value+i) - (*(y_value+i));
+                sum += d * d;
+            }
 
-//			while(x->index != -1)
-//			{
-//				sum += x->value * x->value;
-//				++x;
-//			}
-//
-//			while(y->index != -1)
-//			{
-//				sum += y->value * y->value;
-//				++y;
-//			}
-			
 			return exp(-param.gamma*sum);
 		}
 		case SIGMOID:
@@ -376,7 +334,7 @@ double Kernel::k_function(const n_index *x_index, const n_value *x_value, const 
 		case PRECOMPUTED:  //x: test (validation), y: SV
 			return x_value[(int)(*y_value)];
 		default:
-			return 0;  // Unreachable 
+			return 0;  // Unreachable
 	}
 }
 
@@ -568,7 +526,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 	int iter = 0;
 	int max_iter = max(10000000, l>INT_MAX/100 ? INT_MAX : 100*l);
 	int counter = min(l,1000)+1;
-	
+
 	while(iter < max_iter)
 	{
 		// show progress and do shrinking
@@ -593,11 +551,11 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			else
 				counter = 1;	// do shrinking next iteration
 		}
-		
+
 		++iter;
 
 		// update alpha[i] and alpha[j], handle bounds carefully
-		
+
 		const Qfloat *Q_i = Q.get_Q(i,active_size);
 		const Qfloat *Q_j = Q.get_Q(j,active_size);
 
@@ -616,7 +574,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 			double diff = alpha[i] - alpha[j];
 			alpha[i] += delta;
 			alpha[j] += delta;
-			
+
 			if(diff > 0)
 			{
 				if(alpha[j] < 0)
@@ -698,7 +656,7 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
 
 		double delta_alpha_i = alpha[i] - old_alpha_i;
 		double delta_alpha_j = alpha[j] - old_alpha_j;
-		
+
 		for(int k=0;k<active_size;k++)
 		{
 			G[k] += Q_i[k]*delta_alpha_i + Q_j[k]*delta_alpha_j;
@@ -798,7 +756,7 @@ int Solver::select_working_set(int &out_i, int &out_j)
 	// j: minimizes the decrease of obj value
 	//    (if quadratic coefficeint <= 0, replace it with tau)
 	//    -y_j*grad(f)_j < -y_i*grad(f)_i, j in I_low(\alpha)
-	
+
 	double Gmax = -INF;
 	double Gmax2 = -INF;
 	int Gmax_idx = -1;
@@ -806,7 +764,7 @@ int Solver::select_working_set(int &out_i, int &out_j)
 	double obj_diff_min = INF;
 
 	for(int t=0;t<active_size;t++)
-		if(y[t]==+1)	
+		if(y[t]==+1)
 		{
 			if(!is_upper_bound(t))
 				if(-G[t] >= Gmax)
@@ -903,7 +861,7 @@ bool Solver::be_shrunk(int i, double Gmax1, double Gmax2)
 	{
 		if(y[i]==+1)
 			return(G[i] > Gmax2);
-		else	
+		else
 			return(G[i] > Gmax1);
 	}
 	else
@@ -919,27 +877,27 @@ void Solver::do_shrinking()
 	// find maximal violating pair first
 	for(i=0;i<active_size;i++)
 	{
-		if(y[i]==+1)	
+		if(y[i]==+1)
 		{
-			if(!is_upper_bound(i))	
+			if(!is_upper_bound(i))
 			{
 				if(-G[i] >= Gmax1)
 					Gmax1 = -G[i];
 			}
-			if(!is_lower_bound(i))	
+			if(!is_lower_bound(i))
 			{
 				if(G[i] >= Gmax2)
 					Gmax2 = G[i];
 			}
 		}
-		else	
+		else
 		{
-			if(!is_upper_bound(i))	
+			if(!is_upper_bound(i))
 			{
 				if(-G[i] >= Gmax2)
 					Gmax2 = -G[i];
 			}
-			if(!is_lower_bound(i))	
+			if(!is_lower_bound(i))
 			{
 				if(G[i] >= Gmax1)
 					Gmax1 = G[i];
@@ -947,7 +905,7 @@ void Solver::do_shrinking()
 		}
 	}
 
-	if(unshrink == false && Gmax1 + Gmax2 <= eps*10) 
+	if(unshrink == false && Gmax1 + Gmax2 <= eps*10)
 	{
 		unshrink = true;
 		reconstruct_gradient();
@@ -1013,7 +971,7 @@ double Solver::calculate_rho()
 // Q matrices for various formulations
 //
 class SVC_Q: public Kernel
-{ 
+{
 public:
 	SVC_Q(const svm_problem& prob, const svm_parameter& param, const schar *y_)
 	:Kernel(prob.l, prob.x_index, prob.x_value, param)
@@ -1024,7 +982,7 @@ public:
 		for(int i=0;i<prob.l;i++)
 			QD[i] = (this->*kernel_function)(i,i);
 	}
-	
+
 	Qfloat *get_Q(int i, int len) const
 	{
 		Qfloat *data;
@@ -1065,7 +1023,7 @@ private:
 
 
 class SVR_Q: public Kernel
-{ 
+{
 public:
 	SVR_Q(const svm_problem& prob, const svm_parameter& param)
 	:Kernel(prob.l, prob.x_index, prob.x_value, param)
@@ -1095,7 +1053,7 @@ public:
 		swap(index[i],index[j]);
 		swap(QD[i],QD[j]);
 	}
-	
+
 	Qfloat *get_Q(int i, int len) const
 	{
 		Qfloat *data;
@@ -1233,7 +1191,7 @@ static decision_function svm_train_one(
 
 // Platt's binary SVM Probablistic Output: an improvement from Lin et al.
 static void sigmoid_train(
-	int l, const double *dec_values, const double *labels, 
+	int l, const double *dec_values, const double *labels,
 	double& A, double& B)
 {
 	double prior1=0, prior0 = 0;
@@ -1242,7 +1200,7 @@ static void sigmoid_train(
 	for (i=0;i<l;i++)
 		if (labels[i] > 0) prior1+=1;
 		else prior0+=1;
-	
+
 	int max_iter=100;	// Maximal number of iterations
 	double min_step=1e-10;	// Minimal step taken in line search
 	double sigma=1e-12;	// For numerically strict PD of Hessian
@@ -1253,7 +1211,7 @@ static void sigmoid_train(
 	double fApB,p,q,h11,h22,h21,g1,g2,det,dA,dB,gd,stepsize;
 	double newA,newB,newf,d1,d2;
 	int iter;
-	
+
 	// Initial Point and Initial Fun Value
 	A=0.0; B=log((prior0+1.0)/(prior1+1.0));
 	double fval = 0.0;
@@ -1373,7 +1331,7 @@ static void svm_binary_svc_probability(
 		subprob.x_index = Malloc(n_index*,subprob.l);
         subprob.x_value = Malloc(n_value*,subprob.l);
 		subprob.y = Malloc(double,subprob.l);
-			
+
 		k=0;
 		for(j=0;j<begin;j++)
 		{
@@ -1423,14 +1381,14 @@ static void svm_binary_svc_probability(
 				svm_predict_values(submodel,prob->x_index[perm[j]], prob->x_value[perm[j]],&(dec_values[perm[j]]));
 				// ensure +1 -1 order; reason not using CV subroutine
 				dec_values[perm[j]] *= submodel->label[0];
-			}		
+			}
 			svm_free_and_destroy_model(&submodel);
 			svm_destroy_param(&subparam);
 		}
 		free(subprob.x_index);
         free(subprob.x_value);
 		free(subprob.y);
-	}		
+	}
 	sigmoid_train(prob->l,dec_values,prob->y,probA,probB);
 	free(dec_values);
 	free(perm);
@@ -1479,8 +1437,8 @@ static void svm_group_classes(const svm_problem *prob, int *nr_class_ret, int **
 	}
 
 	//
-	// Labels are ordered by their first occurrence in the training set. 
-	// However, for two-class sets with -1/+1 labels and -1 appears first, 
+	// Labels are ordered by their first occurrence in the training set.
+	// However, for two-class sets with -1/+1 labels and -1 appears first,
 	// we swap labels to ensure that internally the binary SVM has positive data corresponding to the +1 instances.
 	//
 	if (nr_class == 2 && label[0] == -1 && label[1] == 1)
@@ -1536,9 +1494,9 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 
 		// group training data of the same class
 		svm_group_classes(prob,&nr_class,&label,&start,&count,perm);
-		if(nr_class == 1) 
+		if(nr_class == 1)
 			info("WARNING: training data in only one class. See README for details.\n");
-		
+
 		n_index **x_index = Malloc(n_index *,l);
         n_value **x_value = Malloc(n_value *,l);
 		int i;
@@ -1554,7 +1512,7 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		for(i=0;i<nr_class;i++)
 			weighted_C[i] = param->C;
 		for(i=0;i<param->nr_weight;i++)
-		{	
+		{
 			int j;
 			for(j=0;j<nr_class;j++)
 				if(param->weight_label[i] == label[j])
@@ -1566,7 +1524,7 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		}
 
 		// train k*(k-1)/2 models
-		
+
 		bool *nonzero = Malloc(bool,l);
 		for(i=0;i<l;i++)
 			nonzero[i] = false;
@@ -1624,11 +1582,11 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 		// build output
 
 		model->nr_class = nr_class;
-		
+
 		model->label = Malloc(int,nr_class);
 		for(i=0;i<nr_class;i++)
 			model->label[i] = label[i];
-		
+
 		model->rho = Malloc(double,nr_class*(nr_class-1)/2);
 		for(i=0;i<nr_class*(nr_class-1)/2;i++)
 			model->rho[i] = f[i].rho;
@@ -1657,14 +1615,14 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 			int nSV = 0;
 			for(int j=0;j<count[i];j++)
 				if(nonzero[start[i]+j])
-				{	
+				{
 					++nSV;
 					++total_sv;
 				}
 			model->nSV[i] = nSV;
 			nz_count[i] = nSV;
 		}
-		
+
 		info("Total nSV = %d\n",total_sv);
 
 		model->l = total_sv;
@@ -1701,7 +1659,7 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 				int sj = start[j];
 				int ci = count[i];
 				int cj = count[j];
-				
+
 				int q = nz_start[i];
 				int k;
 				for(k=0;k<ci;k++)
@@ -1713,7 +1671,7 @@ svm_model *svm_train(const svm_problem *prob, const svm_parameter *param)
 						model->sv_coef[i][q++] = f[p].alpha[ci+k];
 				++p;
 			}
-		
+
 		free(label);
 		free(probA);
 		free(probB);
@@ -1761,7 +1719,7 @@ double svm_predict_values(const svm_model *model, const n_index *x_index, const 
 	{
 		int nr_class = model->nr_class;
 		int l = model->l;
-		
+
 		double *kvalue = Malloc(double,l);
 		for(i=0;i<l;i++)
 			kvalue[i] = Kernel::k_function(x_index, x_value,model->SV_index[i],model->SV_value[i],model->param);
@@ -1784,7 +1742,7 @@ double svm_predict_values(const svm_model *model, const n_index *x_index, const 
 				int sj = start[j];
 				int ci = model->nSV[i];
 				int cj = model->nSV[j];
-				
+
 				int k;
 				double *coef1 = model->sv_coef[j-1];
 				double *coef2 = model->sv_coef[i];
@@ -1853,14 +1811,14 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 	int l = model->l;
 	fprintf(fp, "nr_class %d\n", nr_class);
 	fprintf(fp, "total_sv %d\n",l);
-	
+
 	{
 		fprintf(fp, "rho");
 		for(int i=0;i<nr_class*(nr_class-1)/2;i++)
 			fprintf(fp," %g",model->rho[i]);
 		fprintf(fp, "\n");
 	}
-	
+
 	if(model->label)
 	{
 		fprintf(fp, "label");
@@ -2001,9 +1959,9 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 	   svm_type != EPSILON_SVR &&
 	   svm_type != NU_SVR)
 		return "unknown svm type";
-	
+
 	// kernel_type, degree
-	
+
 	int kernel_type = param->kernel_type;
 	if(kernel_type != LINEAR &&
 	   kernel_type != POLY &&
@@ -2056,7 +2014,7 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 
 
 	// check whether nu-svc is feasible
-	
+
 	if(svm_type == NU_SVC)
 	{
 		int l = prob->l;
@@ -2089,7 +2047,7 @@ const char *svm_check_parameter(const svm_problem *prob, const svm_parameter *pa
 				++nr_class;
 			}
 		}
-	
+
 		for(i=0;i<nr_class;i++)
 		{
 			int n1 = count[i];

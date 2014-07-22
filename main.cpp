@@ -63,13 +63,14 @@ int nr_fold;
 static char *line = NULL;
 static int max_line_len;
 
+
 static char* readline(FILE *input)
 {
 	int len;
-	
+
 	if(fgets(line,max_line_len,input) == NULL)
 		return NULL;
-    
+
 	while(strrchr(line,'\n') == NULL)
 	{
 		max_line_len *= 2;
@@ -86,18 +87,18 @@ int main(int argc, char **argv)
 	char input_file_name[1024];
 	char model_file_name[1024];
 	const char *error_msg;
-    
+
 	parse_command_line(argc, argv, input_file_name, model_file_name);
 	read_problem(input_file_name);
 	error_msg = svm_check_parameter(&prob,&param);
-    
+
 	if(error_msg)
 	{
 		fprintf(stderr,"ERROR: %s\n",error_msg);
 		exit(1);
 	}
-    
-	
+
+
 	{
 		model = svm_train(&prob,&param);
 		if(svm_save_model(model_file_name,model))
@@ -114,7 +115,7 @@ int main(int argc, char **argv)
 	free(x_space_index);
     free(x_space_value);
 	free(line);
-    
+
 	return 0;
 }
 
@@ -123,7 +124,7 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 {
 	int i;
 	void (*print_func)(const char*) = NULL;	// default printing to stdout
-    
+
 	// default values
 	param.svm_type = C_SVC;
 	param.kernel_type = RBF;
@@ -141,7 +142,7 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 	param.weight_label = NULL;
 	param.weight = NULL;
 	cross_validation = 0;
-    
+
 	// parse options
 	for(i=1;i<argc;i++)
 	{
@@ -211,16 +212,16 @@ void parse_command_line(int argc, char **argv, char *input_file_name, char *mode
 				exit_with_help();
 		}
 	}
-    
+
 	svm_set_print_string_function(print_func);
-    
+
 	// determine filenames
-    
+
 	if(i>=argc)
 		exit_with_help();
-    
+
 	strcpy(input_file_name, argv[i]);
-    
+
 	if(i<argc-1)
 		strcpy(model_file_name,argv[i+1]);
 	else
@@ -242,45 +243,58 @@ void read_problem(const char *filename)
 	FILE *fp = fopen(filename,"r");
 	char *endptr;
 	char *idx, *val, *label;
-    
+
 	if(fp == NULL)
 	{
 		fprintf(stderr,"can't open input file %s\n",filename);
 		exit(1);
 	}
-    
+
 	prob.l = 0;
 	elements = 0;
-    
+
 	max_line_len = 1024;
 	line = Malloc(char,max_line_len);
 	while(readline(fp)!=NULL)
 	{
 		char *p = strtok(line," \t"); // label
-        
+
 		// features
 		while(1)
 		{
 			p = strtok(NULL," \t");
-			if(p == NULL || *p == '\n') // check '\n' as ' ' may be after the last feature
+            if(p == NULL || *p == '\n') // check '\n' as ' ' may be after the last feature
 				break;
-			++elements;
+            char *pos = strchr(p, ':');
+            if(pos !=NULL)
+            {
+                char *tmp = Malloc(char, pos-p+1);
+                strncpy(tmp, p, pos-p);
+                int tmpNumber = (int) strtol(tmp, &endptr, 10);
+                if (tmpNumber > mt_max_index)
+                    mt_max_index = tmpNumber;
+
+            }
+            else
+                continue;
+
 		}
-		++elements;
 		++prob.l;
 	}
 	rewind(fp);
-    
+    ++mt_max_index;
+    elements = prob.l * mt_max_index;
 	prob.y = Malloc(double,prob.l);
 	prob.x_index = Malloc(n_index *,prob.l);
     prob.x_value = Malloc(n_value *,prob.l);
-	x_space_index = Malloc(n_index,elements);
-    x_space_value = Malloc(n_value,elements);
-    
+    prob.max_index = mt_max_index;
+	x_space_index = (n_index*)calloc(elements, sizeof(n_index));
+    x_space_value = (n_value*)calloc(elements, sizeof(n_value));
 	max_index = 0;
 	j=0;
 	for(i=0;i<prob.l;i++)
 	{
+
 		inst_max_index = -1; // strtol gives 0 if wrong format, and precomputed kernel has <index> start from 0
 		readline(fp);
 		prob.x_index[i] = &x_space_index[j];
@@ -288,56 +302,40 @@ void read_problem(const char *filename)
 		label = strtok(line," \t\n");
 		if(label == NULL) // empty line
 			exit_input_error(i+1);
-        
+
 		prob.y[i] = strtod(label,&endptr);
 		if(endptr == label || *endptr != '\0')
 			exit_input_error(i+1);
-        
+
 		while(1)
 		{
 			idx = strtok(NULL,":");
 			val = strtok(NULL," \t");
-            
+
 			if(val == NULL)
 				break;
-            
+
 			errno = 0;
 			x_space_index[j] = (int) strtol(idx,&endptr,10);
 			if(endptr == idx || errno != 0 || *endptr != '\0' || x_space_index[j] <= inst_max_index)
 				exit_input_error(i+1);
 			else
 				inst_max_index = x_space_index[j];
-            
+
 			errno = 0;
 			x_space_value[j] = strtod(val,&endptr);
 			if(endptr == val || errno != 0 || (*endptr != '\0' && !isspace(*endptr)))
 				exit_input_error(i+1);
-            
+
 			++j;
 		}
-        
+        x_space_index[++j] = -1;
 		if(inst_max_index > max_index)
 			max_index = inst_max_index;
-		x_space_index[j++] = -1;
 	}
-    
+
 	if(param.gamma == 0 && max_index > 0)
 		param.gamma = 1.0/max_index;
-    
-//	if(param.kernel_type == PRECOMPUTED)
-//		for(i=0;i<prob.l;i++)
-//		{
-//			if (prob.x[i][0].index != 0)
-//			{
-//				fprintf(stderr,"Wrong input format: first column must be 0:sample_serial_number\n");
-//				exit(1);
-//			}
-//			if ((int)prob.x[i][0].value <= 0 || (int)prob.x[i][0].value > max_index)
-//			{
-//				fprintf(stderr,"Wrong input format: sample_serial_number out of range\n");
-//				exit(1);
-//			}
-//		}
-    
+
 	fclose(fp);
 }

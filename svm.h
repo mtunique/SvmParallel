@@ -16,13 +16,14 @@ typedef double n_value;
 //	int index;
 //	double value;
 //};
-
+static int mt_max_index;
 struct svm_problem
 {
 	int l;
 	double *y;
 	n_index **x_index;
     n_value **x_value;
+    int max_index;
 };
 
 enum { C_SVC, NU_SVC, ONE_CLASS, EPSILON_SVR, NU_SVR };	/* svm_type */
