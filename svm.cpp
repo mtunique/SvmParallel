@@ -153,7 +153,10 @@ int Cache::get_data(const int index, Qfloat **data, int len)
         swap(h->len,len);
     }
     
+    
+    
     lru_insert(h);
+    
     *data = h->data;
     return len;
 }
@@ -791,10 +794,26 @@ void Solver::Solve(int l, const QMatrix& Q, const double *p_, const schar *y_,
         si->upper_bound_n = Cn;
         
         info("\noptimization finished, #iter = %d\n",iter);
+        
+        
+        //free(mpi_start);
+        //free(mpi_len);
+        info("debug  %d\n\n", mpi_id);
+        mpi_info = Malloc(int, 3);
+        
+        for (int i = 1; i <= mpi_size; ++i) {
+            
+            mpi_info[0] = -1;
+            mpi_info[1] = 0;
+            mpi_info[2] = 0;
+            MPI_Send(mpi_info, 3, MPI_INT, i, 0, MPI_COMM_WORLD);
+        }
+        
+        //free(mpi_info);
+        
     }
     
-    free(mpi_start);
-    free(mpi_len);
+    
     
     delete[] p;
     delete[] y;
@@ -1050,10 +1069,12 @@ public:
     
     Qfloat *Get_Q(int i, int len) const
     {
+        
         Qfloat *data;
         int start, j;
         if((start = cache->get_data(i,&data,len)) < len)
         {
+            
             for(j=start;j<len;j++)
                 data[j] = (Qfloat)(y[i]*y[j]*(this->*kernel_function)(i,j));
         }
@@ -1062,36 +1083,63 @@ public:
     
     Qfloat *get_Q(int i, int len) const
     {
-        mpi_info = Malloc(int, 3);
-        Qfloat *re_data;
-        cache->get_data(i, &re_data, len);
-        Qfloat *data;
         
+        mpi_info = Malloc(int, 3);
+        len -=i;
+        int ii = i;
+        
+        Qfloat *re_data;
+        Qfloat *data;
         if(mpi_id)
         {
             while (1) {
                 MPI_Recv(mpi_info, 3, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &sta);
-                data = Get_Q(mpi_info[0], mpi_info[2]);
+                info("%d get %d %d %d from %d \n\n\n", mpi_id, mpi_info[0], mpi_info[1], mpi_info[2], sta.MPI_SOURCE);
+                if (mpi_info[0] == -1) {
+                    break;
+                }
+                
+                
+                Qfloat *pre_data = (Qfloat *)Get_Q(mpi_info[0], mpi_info[2]);
+                data = Malloc(Qfloat, mpi_info[1]);
+                
+                for (int i = 0; i<mpi_info[2]; ++i) {
+                    data[i] = pre_data[i];
+                }
+                
                 MPI_Send(data, mpi_info[1], MPI_FLOAT, 0, 1, MPI_COMM_WORLD);
+                //free(data);
             }
         }
         else
         {
+            cache->get_data(i, &re_data, len);
+            info("give start %d len %d \n\n", i, len);
             int new_len = len / mpi_size;
-            int now = 0;
+            info("newlen %d \n\n\n", new_len);
+            
+            
+            if (new_len * mpi_size != len)
+                ++new_len;
+            info("newlen %d \n\n\n", new_len);
+            
+            
+            int now = i;
             for (int i = 1; i< mpi_size; ++i) {
                 mpi_start[i-1] = now;
                 mpi_len  [i-1] = new_len;
-                now += new_len;
-                mpi_info[0] = i;
+                
+                mpi_info[0] = now;
                 mpi_info[1] = new_len;
                 mpi_info[2] = new_len;
+                now += new_len;
                 MPI_Send(mpi_info, 3, MPI_INT, i, 0, MPI_COMM_WORLD);
             }
             
             mpi_start[mpi_size] = now;
-            mpi_len[mpi_size]   = len - now;
-            mpi_info[0] = mpi_size;
+            
+            mpi_len[mpi_size]   = ii + len - now;
+            mpi_info[0] = now;
             mpi_info[1] = new_len;
             mpi_info[2] = mpi_len[mpi_size];
             MPI_Send(mpi_info, 3, MPI_INT, mpi_size, 0, MPI_COMM_WORLD);
@@ -1108,7 +1156,7 @@ public:
         }
         
     
-        free(mpi_info);
+        //free(mpi_info);
         return re_data;
     }
     
